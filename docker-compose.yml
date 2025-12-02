@@ -1,0 +1,70 @@
+# ===========================================
+# Promethia - Docker Compose Configuration
+# ===========================================
+# Usage: docker-compose up -d
+
+version: '3.8'
+
+services:
+  promethia:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: promethia-app
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=production
+      - AI_PROVIDER=${AI_PROVIDER:-claude}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - AI_MODEL=${AI_MODEL:-claude-sonnet-4-20250514}
+      - OLLAMA_BASE_URL=${OLLAMA_BASE_URL:-http://ollama:11434}
+    networks:
+      - promethia-network
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:3000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # Optional: Local Ollama for AI fallback
+  ollama:
+    image: ollama/ollama:latest
+    container_name: promethia-ollama
+    restart: unless-stopped
+    volumes:
+      - ollama-data:/root/.ollama
+    ports:
+      - "11434:11434"
+    networks:
+      - promethia-network
+    profiles:
+      - with-ollama
+
+  # Optional: Nginx reverse proxy
+  nginx:
+    image: nginx:alpine
+    container_name: promethia-nginx
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./ssl:/etc/nginx/ssl:ro
+    depends_on:
+      - promethia
+    networks:
+      - promethia-network
+    profiles:
+      - with-nginx
+
+networks:
+  promethia-network:
+    driver: bridge
+
+volumes:
+  ollama-data:
+

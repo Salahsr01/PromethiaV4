@@ -5,6 +5,14 @@ import { supabase } from '../lib/supabase'
 import type { RealtimeChannel } from '@supabase/supabase-js'
 
 // Types
+export interface CursorPosition {
+  x: number
+  y: number
+  visitorId: string
+  visitorName: string
+  color: string
+}
+
 export interface Collaborator {
   id: string
   name: string
@@ -14,6 +22,7 @@ export interface Collaborator {
   isTyping: boolean
   color: string
   lastSeenAt: Date
+  cursorPosition?: { x: number; y: number }
 }
 
 export interface CollaborativeMessage {
@@ -38,7 +47,8 @@ interface CollaborationContextType {
   isConnected: boolean
   messages: CollaborativeMessage[]
   isAITyping: boolean
-  
+  cursorPositions: CursorPosition[]
+
   // Actions
   startCollaboration: () => Promise<string>
   joinCollaboration: (code: string) => Promise<boolean>
@@ -50,6 +60,7 @@ interface CollaborationContextType {
   setAITyping: (isTyping: boolean) => void
   generateInviteLink: () => string
   setVisitorName: (name: string) => void
+  broadcastCursorPosition: (x: number, y: number) => void
 }
 
 const CollaborationContext = createContext<CollaborationContextType | null>(null)
@@ -100,9 +111,11 @@ export function CollaborationProvider({ children }: { children: React.ReactNode 
   const [isConnected, setIsConnected] = useState(false)
   const [messages, setMessages] = useState<CollaborativeMessage[]>([])
   const [isAITyping, setIsAITyping] = useState(false)
-  
+  const [cursorPositions, setCursorPositions] = useState<CursorPosition[]>([])
+
   const channelRef = useRef<RealtimeChannel | null>(null)
   const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null)
+  const cursorThrottleRef = useRef<NodeJS.Timeout | null>(null)
 
   // Charger le nom depuis localStorage
   useEffect(() => {
@@ -165,13 +178,14 @@ export function CollaborationProvider({ children }: { children: React.ReactNode 
       await supabase.removeChannel(channelRef.current)
       channelRef.current = null
     }
-    
+
     setIsCollabActive(false)
     setInviteCode(null)
     setCollaborators([])
     setTypingUsers([])
     setIsConnected(false)
     setMessages([])
+    setCursorPositions([])
   }, [visitorId, visitorName])
 
   // Toggle collaboration
@@ -251,9 +265,9 @@ export function CollaborationProvider({ children }: { children: React.ReactNode 
   // Indiquer que l'IA est en train de répondre
   const setAITyping = useCallback((isTyping: boolean) => {
     if (!channelRef.current) return
-    
+
     setIsAITyping(isTyping)
-    
+
     // Broadcaster l'état à tous
     channelRef.current.send({
       type: 'broadcast',
@@ -261,6 +275,30 @@ export function CollaborationProvider({ children }: { children: React.ReactNode 
       payload: { typing: isTyping }
     })
   }, [])
+
+  // Broadcaster la position du curseur (throttled à 50ms)
+  const broadcastCursorPosition = useCallback((x: number, y: number) => {
+    if (!channelRef.current || !isCollabActive) return
+
+    // Throttle pour éviter trop de messages
+    if (cursorThrottleRef.current) return
+
+    cursorThrottleRef.current = setTimeout(() => {
+      cursorThrottleRef.current = null
+    }, 50)
+
+    channelRef.current.send({
+      type: 'broadcast',
+      event: 'cursor_move',
+      payload: {
+        visitorId,
+        visitorName,
+        color: visitorColor,
+        x,
+        y
+      }
+    })
+  }, [isCollabActive, visitorId, visitorName, visitorColor])
 
   // Broadcaster une réponse de l'IA à tous les participants
   const broadcastAIResponse = useCallback(async (content: string): Promise<boolean> => {
@@ -368,6 +406,31 @@ export function CollaborationProvider({ children }: { children: React.ReactNode 
           })
         }
       })
+      // Position du curseur d'un collaborateur
+      .on('broadcast', { event: 'cursor_move' }, ({ payload }) => {
+        const { visitorId: cursorVisitorId, visitorName: cursorName, color, x, y } = payload
+        if (cursorVisitorId !== visitorId) {
+          setCursorPositions(prev => {
+            // Mettre à jour ou ajouter la position
+            const existingIndex = prev.findIndex(c => c.visitorId === cursorVisitorId)
+            const newPosition: CursorPosition = {
+              visitorId: cursorVisitorId,
+              visitorName: cursorName,
+              color,
+              x,
+              y
+            }
+
+            if (existingIndex >= 0) {
+              const updated = [...prev]
+              updated[existingIndex] = newPosition
+              return updated
+            } else {
+              return [...prev, newPosition]
+            }
+          })
+        }
+      })
       // IA en train de répondre
       .on('broadcast', { event: 'ai_typing' }, ({ payload }) => {
         console.log('🤖 IA typing:', payload.typing)
@@ -461,6 +524,7 @@ export function CollaborationProvider({ children }: { children: React.ReactNode 
       isConnected,
       messages,
       isAITyping,
+      cursorPositions,
       startCollaboration,
       joinCollaboration,
       leaveCollaboration,
@@ -470,7 +534,8 @@ export function CollaborationProvider({ children }: { children: React.ReactNode 
       broadcastAIResponse,
       setAITyping,
       generateInviteLink,
-      setVisitorName: handleSetVisitorName
+      setVisitorName: handleSetVisitorName,
+      broadcastCursorPosition
     }}>
       {children}
     </CollaborationContext.Provider>

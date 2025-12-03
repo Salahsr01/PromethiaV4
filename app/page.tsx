@@ -9,6 +9,7 @@ import { useChat, type Suggestion } from './hooks/useChat'
 import IALoadingAnimation from './components/IALoadingAnimation'
 import { CollaborationBar, CollaborationPanel } from './components/CollaborationPanel'
 import { useCollaborationContext, type CollaborativeMessage } from './contexts/CollaborationContext'
+import { CollaboratorCursors } from './components/CollaboratorCursor'
 
 // Composant pour afficher un message collaboratif (format similaire au chat normal)
 function CollabMessageBubble({ message, isOwnMessage }: { message: CollaborativeMessage; isOwnMessage: boolean }) {
@@ -63,9 +64,9 @@ export default function Page() {
   const [showCollabPanel, setShowCollabPanel] = useState(false)
   const [isWebSearchActive, setIsWebSearchActive] = useState(false)
   
-  const { 
-    isCollabActive, 
-    toggleCollaboration, 
+  const {
+    isCollabActive,
+    toggleCollaboration,
     collaborators,
     typingUsers,
     setTyping,
@@ -74,7 +75,9 @@ export default function Page() {
     broadcastAIResponse,
     isAITyping,
     setAITyping,
-    visitorName
+    visitorName,
+    cursorPositions,
+    broadcastCursorPosition
   } = useCollaborationContext()
   
   const conversationEndRef = useRef<HTMLDivElement>(null)
@@ -116,6 +119,21 @@ export default function Page() {
       conversationEndRef.current.scrollIntoView({ behavior: 'smooth' })
     }
   }, [messages, isLoading, collabMessages])
+
+  // Broadcaster la position du curseur en mode collaboration
+  useEffect(() => {
+    if (!isCollabActive) return
+
+    const handleMouseMove = (e: MouseEvent) => {
+      broadcastCursorPosition(e.clientX, e.clientY)
+    }
+
+    window.addEventListener('mousemove', handleMouseMove)
+
+    return () => {
+      window.removeEventListener('mousemove', handleMouseMove)
+    }
+  }, [isCollabActive, broadcastCursorPosition])
 
 
   const handleSend = async () => {
@@ -167,10 +185,16 @@ export default function Page() {
   }
 
   return (
-    <div className="relative w-full min-h-screen bg-surface">
+    <div
+      className="relative w-full min-h-screen bg-surface"
+      style={isCollabActive ? { cursor: 'url(/curseur.svg) 2 2, auto' } : {}}
+    >
+      {/* Curseurs des collaborateurs */}
+      {isCollabActive && <CollaboratorCursors cursorPositions={cursorPositions} />}
+
       {/* Barre de collaboration */}
       <CollaborationBar />
-      
+
       {/* Panel de collaboration */}
       <CollaborationPanel isOpen={showCollabPanel} onClose={() => setShowCollabPanel(false)} />
       
